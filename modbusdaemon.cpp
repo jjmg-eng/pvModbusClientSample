@@ -17,7 +17,7 @@
 #define MODBUS_IDLETIME (4*1000)/96
 #define SERIAL_DEVICE   "/dev/ttyUSB0"
 rlModbus       modbus(256+1,rlModbus::MODBUS_RTU);
-rlSerial       serial;
+rlSocket       sock("127.0.0.1",5502,1);
 rlSharedMemory shm("/srv/automation/shm/modbus.shm",24);
 rlMailbox      mbx("/srv/automation/mbx/modbus.mbx");
 rlThread       thread;
@@ -39,7 +39,6 @@ void *watchdogthread(void *arg)
     if(cnt1 == watchcnt1) break;
     cnt1 = watchcnt1;
   }
-  serial.closeDevice();
   rlsleep(100);
 #ifdef unix
   rlexec(av0);
@@ -63,6 +62,7 @@ void *reader(void *arg)
     rlsleep(MODBUS_IDLETIME);
     ret = modbus.write( slave, function, &buf[2], buflen-2);
     ret = modbus.response( &slave, &function, buf);
+    if(ret != rlModbus::MODBUS_SUCCESS) sock.disconnect();
     rlsleep(MODBUS_IDLETIME);
     thread.unlock();
     if(ret < 0)
@@ -88,6 +88,7 @@ int modbusCycle(int offset, int slave, int function, int start_adr, int num_regi
   thread.lock();
   ret = modbus.request(slave, function, start_adr, num_register);
   if(ret >= 0) ret = modbus.response( &slave, &function, data);
+  if(ret < 0) sock.disconnect();
   thread.unlock();
   if(ret > 0) shm.write(offset,data,ret);
   else
@@ -105,14 +106,8 @@ int main(int ac, char **av)
   int offset,ret,first;
   if(ac > 0) av0 = av[0];
   first = 1;
-  while(serial.openDevice(SERIAL_DEVICE,B9600,1,1,8,1,rlSerial::NONE) < 0)
-  {
-    if(first==1) printf("could not open serial device %s\n",SERIAL_DEVICE);
-    first = 0;
-    rlsleep(1000);
-  }
   printf("\n%s starting\n",av0);
-  modbus.registerSerial(&serial);
+  modbus.registerSocket(&sock);
   thread.create(reader,NULL);
   watchdog.create(watchdogthread,NULL);
 
@@ -126,15 +121,14 @@ int main(int ac, char **av)
     shm.write(modbusdaemon_LIFE_COUNTER_BASE,&lifeCounter,2);
     offset = 0;
     //    modbusCycle(offset, slave, function, start_adr, num_register);
-    ret = modbusCycle(offset,1,2,0,8);
+    ret = modbusCycle(offset,2,1,0,8);
     if(ret>0) offset += ret; else continue;
     ret = modbusCycle(offset,1,1,0,8);
     if(ret>0) offset += ret; else continue;
-    ret = modbusCycle(offset,2,4,0,8);
+    ret = modbusCycle(offset,3,3,0,8);
     if(ret>0) offset += ret; else continue;
   }
 
   // we will never come here
-  serial.closeDevice();
   return 0;
 }
