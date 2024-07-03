@@ -66,6 +66,22 @@ rlMutex    dbmutex;
 qtDatabase db;
 static const char *tableName="REMOTA";
 static char buf[16384];
+static unsigned int oldBits[10] = {0,0,0,0,0,0,0,0,0,0}; // 320 bits
+
+static int readBit(int b)
+{
+	unsigned int bit = b % 32;
+	unsigned int w = b / 32;
+	return !!(oldBits[w] & 1 << bit);
+}
+
+static void writeBit(int b, int val)
+{
+	int bit = b % 32;
+	int w = b / 32;
+	if(val) oldBits[w] |=   1 << bit;
+	else    oldBits[w] &= ~(1 << bit);
+}
 
 static void task01()
 {
@@ -104,12 +120,15 @@ static void setup()
 
 	dbmutex.lock();
 	db.open("QMYSQL","localhost","pvdb","","");
+	db.dbQuery("create table if not exists ALARM (t timestamp(3), Estado varchar(3), Descrição varchar(255));");
+	db.dbQuery("create index if not exists idx_ALARM on ALARM(t);");
 
 	i=sprintf(buf,"create table if not exists %s (t timestamp(3)",tableName);
 	for (j=0; j<8; j++) i+=sprintf(&buf[i],",AI%d float", j+1);
 	i+=sprintf(&buf[i],");"); buf[i]=0;
 	db.dbQuery(buf);
 	i=sprintf(buf,"create index if not exists idx_%s on %s(t);",tableName, tableName);
+        db.dbQuery(buf);
         i=sprintf(buf,"select * from %s limit 1;",tableName);
         db.dbQuery(buf);
         dbmutex.unlock();
@@ -120,12 +139,27 @@ static void setup()
 
 #define TZ 100
 
+const char *DIOname[16] = { "DI1", "DI2", "DI3", "DI4", "DI5", "DI6", "DI7", "DI8", "DO1", "DO2", "DO3", "DO4", "DO5", "DO6", "DO7", "DO8" };
+ 
 static void loop()
 {
 	static int i=0;
 	
 	if(!(i%10)) task01(); // Chamar task01 a cada 1 segundo
 	if(!(i%30)) task02(); // Chamar task02 a cada 3 segundos
+
+	for(int j=0; j<16; j++)
+	{
+		int b  = !!modbus.readBit(modbusdaemon_CYCLE1_BASE,j);
+		if(b != readBit(j))
+		{
+			sprintf(buf,"INSERT ALARM VALUES (NOW(3), '%s', '%s');", b ? "ON" : "OFF", DIOname[j]);
+			dbmutex.lock(); db.dbQuery(buf); dbmutex.unlock();
+			writeBit(j, b);
+			// printf("%s\n",buf);
+		}
+	}
+
 
 	i++;
 	pvSleep(TZ); // TZ = 100 ms
