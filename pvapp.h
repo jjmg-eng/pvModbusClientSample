@@ -119,7 +119,7 @@ static void setup()
 	int i,j,n;
 
 	dbmutex.lock();
-	db.open("QMYSQL","localhost","pvdb","","");
+	db.open("QMYSQL","localhost","pvdb","pvbrowser","pvbrowser");
 	db.dbQuery("create table if not exists ALARM (t timestamp(3), Estado varchar(3), Descrição varchar(255));");
 	db.dbQuery("create index if not exists idx_ALARM on ALARM(t);");
 
